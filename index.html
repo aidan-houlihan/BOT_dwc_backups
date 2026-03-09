@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ANSP Weekly ZIP Combiner</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; }
+    .container { max-width: 880px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 1.6rem; margin: 6px 0; }
+    p.help { color: #666; margin-top: 0; }
+    .card { background: #fff; color: #111; border-radius: 16px; padding: 20px; box-shadow: 0 6px 24px rgba(0,0,0,0.08); }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+    label { font-weight: 600; }
+    input[type="text"] {
+      border: 1px solid #ccc; border-radius: 10px; padding: 10px; font-size: 0.95rem; width: 100%;
+    }
+    .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .btn {
+      background: #1f6feb; color: white; border: none; border-radius: 10px; padding: 12px 18px;
+      font-size: 1rem; cursor: pointer; transition: transform 0.05s ease, box-shadow 0.15s ease;
+      box-shadow: 0 6px 14px rgba(31,111,235,0.35);
+    }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 10px 18px rgba(31,111,235,0.45); }
+    .status { margin-top: 16px; background: #f6f8fa; border-radius: 10px; padding: 12px; font-family: ui-monospace, Menlo, monospace; font-size: 0.9rem; white-space: pre-wrap; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .badge { display: inline-block; background: #eee; border-radius: 999px; padding: 2px 10px; font-size: 0.8rem; margin-left: 8px; }
+    .success { color: #1a7f37; }
+    .error { color: #b42318; }
+    ul.sources { margin: 0.25rem 0 1rem; padding-left: 1.2rem; }
+    code.kbd { background: #f3f4f6; padding: 1px 6px; border-radius: 6px; }
+    @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+  <!-- JS libraries for zipping & download -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1>ANSP Weekly ZIP Combiner <span class="badge">Fixed Sources</span></h1>
+    <p class="help">
+      This tool downloads the two fixed DwC-A ZIP files, renames each by appending its source domain
+      (e.g., <code>ANSP-ENT_DwC-A_ecdysis.zip</code>), and bundles them into a single ZIP you can save.
+    </p>
+
+    <div class="card">
+      <div class="field">
+        <label>Sources</label>
+        <ul class="sources">
+          <li><a href="https://midatlanticherbaria.org/portal/content/dwca/PH_DwC-A.zip" target="_blank" rel="noopener">Midatlantic Herbaria</a></li>
+          <li><a href="https://bryophyteportal.org/portal/content/dwca/PH_DwC-A.zip" target="_blank" rel="noopener">Bryophyte Portal</a></li>
+          <li><a href="https://mycoportal.org/portal/content/dwca/PH_DwC-A.zip" target="_blank" rel="noopener">Mycportal</a></li>
+          <li><a href="https://lichenportal.org/portal/content/dwca/PH_DwC-A.zip" target="_blank" rel="noopener">Lichen Portal</a></li>
+          <li><a href="https://macroalgae.org/portal/content/dwca/PH_DwC-A.zip" target="_blank" rel="noopener">Macroalgae</a></li>
+        </ul>
+      </div>
+
+      <div class="grid">
+        <div class="field">
+          <label for="archiveName">Final archive base name</label>
+          <input id="archiveName" type="text" value="BOT_combined" />
+        </div>
+        <div class="field">
+          <label for="zipSubfolder">Optional subfolder <em>inside</em> the final zip</label>
+          <input id="zipSubfolder" type="text" placeholder="e.g., weekly/2026-01-08" />
+        </div>
+      </div>
+
+      <div class="row">
+        <label class="row" style="gap:8px;">
+          <input id="addTimestamp" type="checkbox" checked />
+          Add date stamp to final archive (YYYY-MM-DD)
+        </label>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <button id="runBtn" class="btn">Create Combined ZIP</button>
+        <span class="muted">Browser decides where to save (Downloads or prompt).</span>
+      </div>
+
+      <div id="status" class="status muted"></div>
+
+      <p class="muted" style="margin-top:10px;">
+        Tip: If downloads fail due to CORS or you need weekly automation, use the GitHub Actions workflow below.
+        You can also right-click each source above and choose <span class="kbd">Save Link As…</span> to download individually.
+      </p>
+    </div>
+  </div>
+
+  <script>
+    // Fixed URLs — same as your Python script
+    const FIXED_URLS = [
+    "https://midatlanticherbaria.org/portal/content/dwca/PH_DwC-A.zip",
+"https://bryophyteportal.org/portal/content/dwca/PH_DwC-A.zip",
+"https://mycoportal.org/portal/content/dwca/PH_DwC-A.zip",
+"https://lichenportal.org/portal/content/dwca/PH_DwC-A.zip",
+"https://macroalgae.org/portal/content/dwca/PH_DwC-A.zip"
+];
+
+    const $ = (id) => document.getElementById(id);
+
+    function extractDomainLabel(hostname) {
+      // Simple "second-level" label extraction: ecdysis.org -> ecdysis
+      const parts = hostname.split('.').filter(Boolean);
+      if (parts.length >= 2) return parts[parts.length - 2];
+      return parts[0] || 'site';
+    }
+
+    function sanitizeName(name) {
+      return name.replace(/[^\w.\-\/]/g, '_');
+    }
+
+    function logStatus(msg, isError = false) {
+      const el = $('status');
+      const prefix = isError ? '❌ ' : '• ';
+      el.classList.toggle('error', isError);
+      el.classList.toggle('success', !isError);
+      el.textContent += prefix + msg + '\n';
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function clearStatus() {
+      const el = $('status');
+      el.textContent = '';
+      el.classList.remove('error', 'success');
+      el.classList.add('muted');
+    }
+
+    async function fetchAsArrayBuffer(url) {
+      // Browser fetch (CORS required by remote server)
+      const res = await fetch(url, { method: 'GET', mode: 'cors', credentials: 'omit', redirect: 'follow', cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      return await res.arrayBuffer();
+    }
+
+    $('runBtn').addEventListener('click', async () => {
+      clearStatus();
+      const runBtn = $('runBtn');
+      runBtn.disabled = true;
+
+      try {
+        const baseName = $('archiveName').value.trim() || 'BOT_combined';
+        const addTimestamp = $('addTimestamp').checked;
+        const subfolder = $('zipSubfolder').value.trim();
+        const ts = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+        const finalZipName = sanitizeName(baseName + (addTimestamp ? '_' + ts : '') + '.zip');
+
+        logStatus(`Starting… (${FIXED_URLS.length} file(s))`);
+        const zip = new JSZip();
+
+        let completed = 0;
+        for (const url of FIXED_URLS) {
+          try {
+            const u = new URL(url);
+            const site = extractDomainLabel(u.hostname);
+            const originalName = u.pathname.split('/').pop() || 'download.zip';
+            const stem = originalName.toLowerCase().endsWith('.zip') ? originalName.slice(0, -4) : originalName;
+            const renamed = `${stem}_${site}.zip`;
+            const internalPath = subfolder ? `${subfolder}/${renamed}` : renamed;
+
+            logStatus(`Fetching ${url} …`);
+            const buf = await fetchAsArrayBuffer(url);
+            zip.file(sanitizeName(internalPath), buf);
+            completed++;
+            logStatus(`✓ Added as ${internalPath}`);
+          } catch (err) {
+            logStatus(`Failed to fetch ${url}: ${err.message}`, true);
+          }
+        }
+
+        if (completed === 0) {
+          logStatus('No files were successfully fetched. Nothing to zip.', true);
+          return;
+        }
+
+        logStatus('Compressing…');
+        const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 9 } });
+        saveAs(blob, finalZipName);
+        logStatus(`Done. Saved ${finalZipName}.`);
+      } catch (err) {
+        logStatus(`Unexpected error: ${err.message}`, true);
+      } finally {
+        runBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
